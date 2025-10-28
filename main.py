@@ -95,29 +95,50 @@ def extract_subtitles_with_playwright(video_id, cookies_base64=None):
                 try {
                     // 从 ytInitialPlayerResponse 提取字幕
                     const playerResponse = window.ytInitialPlayerResponse;
-                    if (!playerResponse || !playerResponse.captions) {
-                        return null;
+                    
+                    // 详细调试信息
+                    if (!playerResponse) {
+                        console.log('❌ ytInitialPlayerResponse 不存在');
+                        return { error: 'No ytInitialPlayerResponse' };
                     }
                     
-                    const captionTracks = playerResponse.captions.playerCaptionsTracklistRenderer.captionTracks;
-                    if (!captionTracks || captionTracks.length === 0) {
-                        return null;
+                    if (!playerResponse.captions) {
+                        console.log('❌ captions 不存在');
+                        console.log('playerResponse keys:', Object.keys(playerResponse));
+                        return { error: 'No captions in playerResponse' };
                     }
+                    
+                    const captionTracks = playerResponse.captions.playerCaptionsTracklistRenderer?.captionTracks;
+                    if (!captionTracks || captionTracks.length === 0) {
+                        console.log('❌ captionTracks 为空');
+                        return { error: 'No caption tracks' };
+                    }
+                    
+                    console.log('✅ 找到字幕:', captionTracks.length, '个');
                     
                     // 优先选择英语字幕
                     let track = captionTracks.find(t => t.languageCode === 'en') || captionTracks[0];
-                    return track.baseUrl;
+                    return { success: true, url: track.baseUrl };
                 } catch (e) {
-                    return null;
+                    console.log('❌ 异常:', e.message);
+                    return { error: e.message };
                 }
             }''')
             
             browser.close()
             
-            if subtitles:
-                print(f"   ✅ 获取到字幕 URL")
-                # 下载字幕内容
-                return fetch_subtitle_from_url(subtitles)
+            # 打印详细的调试信息
+            print(f"   📊 Playwright 返回: {subtitles}")
+            
+            if subtitles and isinstance(subtitles, dict):
+                if subtitles.get('success') and subtitles.get('url'):
+                    print(f"   ✅ 获取到字幕 URL")
+                    # 下载字幕内容
+                    return fetch_subtitle_from_url(subtitles['url'])
+                else:
+                    error_msg = subtitles.get('error', 'Unknown error')
+                    print(f"   ❌ Playwright 错误: {error_msg}")
+                    return None
             else:
                 print(f"   ❌ 未找到字幕数据")
                 return None
