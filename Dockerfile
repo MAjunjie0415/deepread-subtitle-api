@@ -16,5 +16,6 @@ COPY . .
 EXPOSE 8000
 
 # 使用 gunicorn 运行（生产环境）
-CMD ["gunicorn", "--bind", "0.0.0.0:8000", "--workers", "2", "--timeout", "120", "main:app"]
+# Zeabur 会自动设置 PORT 环境变量
+CMD gunicorn --bind 0.0.0.0:${PORT:-8000} --workers 2 --timeout 120 --access-logfile - --error-logfile - main:app
 
