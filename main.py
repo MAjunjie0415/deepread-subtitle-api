@@ -88,13 +88,29 @@ def extract():
             
             # 如果配置了 cookies，写入临时文件
             import tempfile
-            cookie_file = None
+            import os as os_module
+            cookie_file_path = None
             if youtube_cookies:
                 print(f"   🍪 使用配置的 YouTube Cookies")
-                cookie_file = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt')
-                cookie_file.write(youtube_cookies)
-                cookie_file.close()
-                ydl_opts['cookiefile'] = cookie_file.name
+                
+                # 创建临时文件
+                fd, cookie_file_path = tempfile.mkstemp(suffix='.txt', text=True)
+                
+                # 写入 cookies
+                with os_module.fdopen(fd, 'w') as f:
+                    f.write(youtube_cookies)
+                    f.flush()
+                
+                print(f"   📝 Cookies 文件已写入: {cookie_file_path}")
+                
+                # 验证文件
+                with open(cookie_file_path, 'r') as f:
+                    content = f.read()
+                    lines = content.split('\n')
+                    cookie_lines = [l for l in lines if l and not l.startswith('#')]
+                    print(f"   ✓ Cookie 文件行数: {len(lines)}，有效 cookie 行数: {len(cookie_lines)}")
+                
+                ydl_opts['cookiefile'] = cookie_file_path
             
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(f"https://www.youtube.com/watch?v={vid}", download=False)
@@ -133,10 +149,10 @@ def extract():
                     raise Exception("yt-dlp 未找到字幕")
             
             # 清理临时 cookie 文件
-            if cookie_file:
-                import os
+            if cookie_file_path:
                 try:
-                    os.unlink(cookie_file.name)
+                    os_module.unlink(cookie_file_path)
+                    print(f"   🗑️  已清理临时 cookie 文件")
                 except:
                     pass
                     
