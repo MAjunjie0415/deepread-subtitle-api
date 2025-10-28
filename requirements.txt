@@ -1,5 +1,6 @@
 Flask==2.3.3
 youtube-transcript-api==0.6.2
 yt-dlp==2024.12.13
+playwright==1.40.0
 gunicorn==21.2.0
 

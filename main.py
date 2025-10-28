@@ -35,6 +35,96 @@ def fetch_subtitle_from_url(url):
         print(f"   ⚠️ 获取字幕 URL 失败: {str(e)}")
         return None
 
+def extract_subtitles_with_playwright(video_id, cookies_base64=None):
+    """使用 Playwright 真实浏览器提取字幕"""
+    try:
+        from playwright.sync_api import sync_playwright
+        import base64
+        
+        print(f"   🎭 启动 Playwright 浏览器...")
+        
+        with sync_playwright() as p:
+            # 启动 Chromium
+            browser = p.chromium.launch(headless=True)
+            
+            # 创建上下文
+            context_options = {
+                'user_agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'viewport': {'width': 1920, 'height': 1080},
+                'locale': 'en-US',
+            }
+            
+            # 如果有 cookies，添加到上下文
+            if cookies_base64:
+                try:
+                    cookies_text = base64.b64decode(cookies_base64).decode('utf-8')
+                    # 解析 Netscape cookies 格式并转换为 Playwright 格式
+                    cookies = []
+                    for line in cookies_text.split('\n'):
+                        if line and not line.startswith('#'):
+                            parts = line.split('\t')
+                            if len(parts) >= 7:
+                                cookies.append({
+                                    'name': parts[5],
+                                    'value': parts[6],
+                                    'domain': parts[0],
+                                    'path': parts[2],
+                                    'expires': int(parts[4]) if parts[4] != '0' else -1,
+                                    'httpOnly': parts[1] == 'TRUE',
+                                    'secure': parts[3] == 'TRUE',
+                                })
+                    context_options['cookies'] = cookies
+                    print(f"   🍪 已加载 {len(cookies)} 个 cookies")
+                except Exception as e:
+                    print(f"   ⚠️  Cookies 解析失败: {e}")
+            
+            context = browser.new_context(**context_options)
+            page = context.new_page()
+            
+            # 访问 YouTube 视频
+            url = f"https://www.youtube.com/watch?v={video_id}"
+            print(f"   🌐 访问: {url}")
+            page.goto(url, wait_until='networkidle', timeout=30000)
+            
+            # 等待页面加载
+            page.wait_for_timeout(3000)
+            
+            # 尝试提取字幕数据
+            subtitles = page.evaluate('''() => {
+                try {
+                    // 从 ytInitialPlayerResponse 提取字幕
+                    const playerResponse = window.ytInitialPlayerResponse;
+                    if (!playerResponse || !playerResponse.captions) {
+                        return null;
+                    }
+                    
+                    const captionTracks = playerResponse.captions.playerCaptionsTracklistRenderer.captionTracks;
+                    if (!captionTracks || captionTracks.length === 0) {
+                        return null;
+                    }
+                    
+                    // 优先选择英语字幕
+                    let track = captionTracks.find(t => t.languageCode === 'en') || captionTracks[0];
+                    return track.baseUrl;
+                } catch (e) {
+                    return null;
+                }
+            }''')
+            
+            browser.close()
+            
+            if subtitles:
+                print(f"   ✅ 获取到字幕 URL")
+                # 下载字幕内容
+                return fetch_subtitle_from_url(subtitles)
+            else:
+                print(f"   ❌ 未找到字幕数据")
+                return None
+                
+    except Exception as e:
+        print(f"   ❌ Playwright 失败: {str(e)}")
+        return None
+
 @app.route("/", methods=["GET"])
 def home():
     """健康检查端点"""
@@ -87,126 +177,142 @@ def extract():
         segments = []
         page = 0
         
-        # 策略 1: 使用 yt-dlp (最强大，能绕过限制)
+        # 策略 0: 使用 Playwright 真实浏览器（最强大！）
         try:
-            print(f"\n🚀 方法 1: 使用 yt-dlp 提取字幕...")
+            print(f"\n🎭 方法 0: 使用 Playwright 真实浏览器...")
+            segments = extract_subtitles_with_playwright(vid, youtube_cookies_base64)
             
-            ydl_opts = {
-                'skip_download': True,
-                'writesubtitles': True,
-                'writeautomaticsub': True,
-                'subtitleslangs': ['en', 'en-US', 'en-GB'],
-                'subtitlesformat': 'json3',
-                'quiet': True,
-                'no_warnings': True,
-                # 伪装成真实浏览器
-                'user_agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'referer': 'https://www.youtube.com/',
-                'headers': {
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                    'Accept-Language': 'en-US,en;q=0.9',
-                    'Accept-Encoding': 'gzip, deflate, br',
-                    'DNT': '1',
-                    'Connection': 'keep-alive',
-                    'Upgrade-Insecure-Requests': '1',
-                },
-            }
-            
-            # 如果配置了 cookies，写入临时文件
-            import tempfile
-            import os as os_module
-            cookie_file_path = None
-            if youtube_cookies:
-                print(f"   🍪 使用配置的 YouTube Cookies")
+            if segments:
+                print(f"✅ Playwright 成功: {len(segments)} 段")
+            else:
+                raise Exception("Playwright 未找到字幕")
                 
-                # 创建临时文件
-                fd, cookie_file_path = tempfile.mkstemp(suffix='.txt', text=True)
-                
-                # 写入 cookies
-                with os_module.fdopen(fd, 'w') as f:
-                    f.write(youtube_cookies)
-                    f.flush()
-                
-                print(f"   📝 Cookies 文件已写入: {cookie_file_path}")
-                
-                # 验证文件
-                with open(cookie_file_path, 'r') as f:
-                    content = f.read()
-                    lines = content.split('\n')
-                    cookie_lines = [l for l in lines if l and not l.startswith('#')]
-                    print(f"   ✓ Cookie 文件行数: {len(lines)}，有效 cookie 行数: {len(cookie_lines)}")
-                
-                ydl_opts['cookiefile'] = cookie_file_path
-            
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(f"https://www.youtube.com/watch?v={vid}", download=False)
-                
-                # 获取字幕
-                if 'subtitles' in info and info['subtitles']:
-                    print(f"📋 找到手动字幕: {list(info['subtitles'].keys())}")
-                    # 优先使用手动字幕
-                    for lang in ['en', 'en-US', 'en-GB']:
-                        if lang in info['subtitles']:
-                            subtitle_url = info['subtitles'][lang][0]['url']
-                            print(f"✅ 使用手动字幕: {lang}")
-                            segments = fetch_subtitle_from_url(subtitle_url)
-                            if segments:
-                                break
-                
-                elif 'automatic_captions' in info and info['automatic_captions']:
-                    print(f"📋 找到自动字幕: {list(info['automatic_captions'].keys())}")
-                    # 使用自动字幕
-                    for lang in ['en', 'en-US', 'en-GB']:
-                        if lang in info['automatic_captions']:
-                            # 找到 json3 格式的字幕
-                            for subtitle in info['automatic_captions'][lang]:
-                                if subtitle.get('ext') == 'json3':
-                                    subtitle_url = subtitle['url']
-                                    print(f"✅ 使用自动字幕: {lang}")
-                                    segments = fetch_subtitle_from_url(subtitle_url)
-                                    if segments:
-                                        break
-                            if segments:
-                                break
-                
-                if segments:
-                    print(f"✅ yt-dlp 成功: {len(segments)} 段")
-                else:
-                    raise Exception("yt-dlp 未找到字幕")
-            
-            # 清理临时 cookie 文件
-            if cookie_file_path:
-                try:
-                    os_module.unlink(cookie_file_path)
-                    print(f"   🗑️  已清理临时 cookie 文件")
-                except:
-                    pass
-                    
-        except Exception as e1:
-            print(f"❌ yt-dlp 失败: {str(e1)}")
-            
-            # 策略 2: 备用 youtube-transcript-api
+        except Exception as e0:
+            print(f"❌ Playwright 失败: {str(e0)}")
+            segments = []
+        
+        # 如果 Playwright 失败，尝试其他方法
+        if not segments:
+            # 策略 1: 使用 yt-dlp (最强大，能绕过限制)
             try:
-                print(f"\n🔄 方法 2: 使用 youtube-transcript-api...")
-                transcript_list = YouTubeTranscriptApi.list_transcripts(vid)
+                print(f"\n🚀 方法 1: 使用 yt-dlp 提取字幕...")
                 
-                # 优先选择英语字幕
-                selected_transcript = None
-                for transcript in transcript_list:
-                    if transcript.language_code in ['en', 'en-US', 'en-GB']:
-                        selected_transcript = transcript
-                        break
+                ydl_opts = {
+                    'skip_download': True,
+                    'writesubtitles': True,
+                    'writeautomaticsub': True,
+                    'subtitleslangs': ['en', 'en-US', 'en-GB'],
+                    'subtitlesformat': 'json3',
+                    'quiet': True,
+                    'no_warnings': True,
+                    # 伪装成真实浏览器
+                    'user_agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'referer': 'https://www.youtube.com/',
+                    'headers': {
+                        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                        'Accept-Language': 'en-US,en;q=0.9',
+                        'Accept-Encoding': 'gzip, deflate, br',
+                        'DNT': '1',
+                        'Connection': 'keep-alive',
+                        'Upgrade-Insecure-Requests': '1',
+                    },
+                }
                 
-                if not selected_transcript:
-                    selected_transcript = list(transcript_list)[0]
+                # 如果配置了 cookies，写入临时文件
+                import tempfile
+                import os as os_module
+                cookie_file_path = None
+                if youtube_cookies:
+                    print(f"   🍪 使用配置的 YouTube Cookies")
+                    
+                    # 创建临时文件
+                    fd, cookie_file_path = tempfile.mkstemp(suffix='.txt', text=True)
+                    
+                    # 写入 cookies
+                    with os_module.fdopen(fd, 'w') as f:
+                        f.write(youtube_cookies)
+                        f.flush()
+                    
+                    print(f"   📝 Cookies 文件已写入: {cookie_file_path}")
+                    
+                    # 验证文件
+                    with open(cookie_file_path, 'r') as f:
+                        content = f.read()
+                        lines = content.split('\n')
+                        cookie_lines = [l for l in lines if l and not l.startswith('#')]
+                        print(f"   ✓ Cookie 文件行数: {len(lines)}，有效 cookie 行数: {len(cookie_lines)}")
+                    
+                    ydl_opts['cookiefile'] = cookie_file_path
                 
-                segments = selected_transcript.fetch()
-                print(f"✅ youtube-transcript-api 成功: {len(segments)} 段")
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(f"https://www.youtube.com/watch?v={vid}", download=False)
+                    
+                    # 获取字幕
+                    if 'subtitles' in info and info['subtitles']:
+                        print(f"📋 找到手动字幕: {list(info['subtitles'].keys())}")
+                        # 优先使用手动字幕
+                        for lang in ['en', 'en-US', 'en-GB']:
+                            if lang in info['subtitles']:
+                                subtitle_url = info['subtitles'][lang][0]['url']
+                                print(f"✅ 使用手动字幕: {lang}")
+                                segments = fetch_subtitle_from_url(subtitle_url)
+                                if segments:
+                                    break
+                    
+                    elif 'automatic_captions' in info and info['automatic_captions']:
+                        print(f"📋 找到自动字幕: {list(info['automatic_captions'].keys())}")
+                        # 使用自动字幕
+                        for lang in ['en', 'en-US', 'en-GB']:
+                            if lang in info['automatic_captions']:
+                                # 找到 json3 格式的字幕
+                                for subtitle in info['automatic_captions'][lang]:
+                                    if subtitle.get('ext') == 'json3':
+                                        subtitle_url = subtitle['url']
+                                        print(f"✅ 使用自动字幕: {lang}")
+                                        segments = fetch_subtitle_from_url(subtitle_url)
+                                        if segments:
+                                            break
+                                if segments:
+                                    break
+                    
+                    if segments:
+                        print(f"✅ yt-dlp 成功: {len(segments)} 段")
+                    else:
+                        raise Exception("yt-dlp 未找到字幕")
                 
-            except Exception as e2:
-                error_msg = f"所有方法都失败了。yt-dlp: {str(e1)}; transcript-api: {str(e2)}"
-                print(f"\n❌ {error_msg}")
-                return jsonify({"error": error_msg}), 404
+                # 清理临时 cookie 文件
+                if cookie_file_path:
+                    try:
+                        os_module.unlink(cookie_file_path)
+                        print(f"   🗑️  已清理临时 cookie 文件")
+                    except:
+                        pass
+                        
+            except Exception as e1:
+                print(f"❌ yt-dlp 失败: {str(e1)}")
+                
+                # 策略 2: 备用 youtube-transcript-api
+                try:
+                    print(f"\n🔄 方法 2: 使用 youtube-transcript-api...")
+                    transcript_list = YouTubeTranscriptApi.list_transcripts(vid)
+                    
+                    # 优先选择英语字幕
+                    selected_transcript = None
+                    for transcript in transcript_list:
+                        if transcript.language_code in ['en', 'en-US', 'en-GB']:
+                            selected_transcript = transcript
+                            break
+                    
+                    if not selected_transcript:
+                        selected_transcript = list(transcript_list)[0]
+                    
+                    segments = selected_transcript.fetch()
+                    print(f"✅ youtube-transcript-api 成功: {len(segments)} 段")
+                    
+                except Exception as e2:
+                    error_msg = f"所有方法都失败了。Playwright: {str(e0)}; yt-dlp: {str(e1)}; transcript-api: {str(e2)}"
+                    print(f"\n❌ {error_msg}")
+                    return jsonify({"error": error_msg}), 404
         
         # 格式化输出
         full_text = " ".join([s["text"] for s in segments])
