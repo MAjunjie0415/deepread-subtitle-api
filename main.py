@@ -37,29 +37,47 @@ def extract():
         segments = []
         page = 0
         
-        # 尝试多种语言
-        languages_to_try = [['en'], ['en-US'], ['a.en'], ['zh-CN', 'zh-Hans']]
-        
-        last_error = None
-        for langs in languages_to_try:
-            try:
-                print(f"\n🔄 尝试语言: {langs}")
-                # 获取可用的字幕列表
-                transcript_list = YouTubeTranscriptApi.list_transcripts(vid)
-                print(f"📋 可用字幕: {[t.language_code for t in transcript_list]}")
-                
-                transcript = YouTubeTranscriptApi.get_transcript(vid, languages=langs)
-                segments = transcript
-                print(f"✅ 成功获取 {len(segments)} 段字幕")
-                break
-            except Exception as e:
-                print(f"❌ {langs} 失败: {str(e)}")
-                last_error = e
-                continue
-        
-        if not segments:
-            error_msg = f"No transcript available. Last error: {str(last_error)}" if last_error else "No transcript available"
-            print(f"\n❌ 最终失败: {error_msg}")
+        # 新策略：先列出所有可用字幕，然后选择第一个
+        try:
+            print(f"\n🔍 正在列出所有可用字幕...")
+            transcript_list = YouTubeTranscriptApi.list_transcripts(vid)
+            
+            # 获取所有可用的字幕
+            available_transcripts = []
+            for transcript in transcript_list:
+                available_transcripts.append({
+                    'language': transcript.language,
+                    'language_code': transcript.language_code,
+                    'is_generated': transcript.is_generated,
+                    'is_translatable': transcript.is_translatable
+                })
+            
+            print(f"📋 找到 {len(available_transcripts)} 个字幕:")
+            for t in available_transcripts:
+                print(f"   - {t['language']} ({t['language_code']}) [自动生成: {t['is_generated']}]")
+            
+            if not available_transcripts:
+                raise Exception("没有找到任何可用字幕")
+            
+            # 优先选择英语字幕，然后是第一个可用的
+            selected_transcript = None
+            for transcript in transcript_list:
+                if transcript.language_code in ['en', 'en-US', 'en-GB']:
+                    selected_transcript = transcript
+                    print(f"✅ 选择英语字幕: {transcript.language} ({transcript.language_code})")
+                    break
+            
+            if not selected_transcript:
+                selected_transcript = list(transcript_list)[0]
+                print(f"✅ 选择第一个可用字幕: {selected_transcript.language} ({selected_transcript.language_code})")
+            
+            # 获取字幕内容
+            segments = selected_transcript.fetch()
+            print(f"✅ 成功获取 {len(segments)} 段字幕")
+            
+        except Exception as e:
+            error_msg = f"获取字幕失败: {str(e)}"
+            print(f"\n❌ {error_msg}")
             return jsonify({"error": error_msg}), 404
         
         # 格式化输出
