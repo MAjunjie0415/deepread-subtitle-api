@@ -54,6 +54,8 @@ def extract_subtitles_with_playwright(video_id, cookies_base64=None):
                 'locale': 'en-US',
             }
             
+            context = browser.new_context(**context_options)
+            
             # 如果有 cookies，添加到上下文
             if cookies_base64:
                 try:
@@ -73,12 +75,11 @@ def extract_subtitles_with_playwright(video_id, cookies_base64=None):
                                     'httpOnly': parts[1] == 'TRUE',
                                     'secure': parts[3] == 'TRUE',
                                 })
-                    context_options['cookies'] = cookies
+                    # 使用 add_cookies 方法添加 cookies
+                    context.add_cookies(cookies)
                     print(f"   🍪 已加载 {len(cookies)} 个 cookies")
                 except Exception as e:
                     print(f"   ⚠️  Cookies 解析失败: {e}")
-            
-            context = browser.new_context(**context_options)
             page = context.new_page()
             
             # 访问 YouTube 视频
