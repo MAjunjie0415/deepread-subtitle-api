@@ -1,6 +1,8 @@
 from flask import Flask, request, jsonify
 from youtube_transcript_api import YouTubeTranscriptApi
+import yt_dlp
 import re
+import json
 
 app = Flask(__name__)
 
@@ -8,6 +10,30 @@ def get_video_id(url):
     """从 YouTube URL 提取视频 ID"""
     m = re.search(r"v=([a-zA-Z0-9_-]{11})", url)
     return m.group(1) if m else None
+
+def fetch_subtitle_from_url(url):
+    """从 URL 获取字幕内容"""
+    try:
+        import urllib.request
+        with urllib.request.urlopen(url) as response:
+            data = json.loads(response.read().decode('utf-8'))
+            
+        if 'events' in data:
+            segments = []
+            for event in data['events']:
+                if 'segs' in event:
+                    text = ''.join([seg.get('utf8', '') for seg in event['segs']]).strip()
+                    if text:
+                        segments.append({
+                            'text': text,
+                            'start': event.get('tStartMs', 0) / 1000,
+                            'duration': event.get('dDurationMs', 0) / 1000
+                        })
+            return segments
+        return None
+    except Exception as e:
+        print(f"   ⚠️ 获取字幕 URL 失败: {str(e)}")
+        return None
 
 @app.route("/", methods=["GET"])
 def home():
@@ -37,48 +63,81 @@ def extract():
         segments = []
         page = 0
         
-        # 新策略：先列出所有可用字幕，然后选择第一个
+        # 策略 1: 使用 yt-dlp (最强大，能绕过限制)
         try:
-            print(f"\n🔍 正在列出所有可用字幕...")
-            transcript_list = YouTubeTranscriptApi.list_transcripts(vid)
+            print(f"\n🚀 方法 1: 使用 yt-dlp 提取字幕...")
             
-            # 获取所有可用的字幕
-            available_transcripts = []
-            for transcript in transcript_list:
-                available_transcripts.append({
-                    'language': transcript.language,
-                    'language_code': transcript.language_code,
-                    'is_generated': transcript.is_generated,
-                    'is_translatable': transcript.is_translatable
-                })
+            ydl_opts = {
+                'skip_download': True,
+                'writesubtitles': True,
+                'writeautomaticsub': True,
+                'subtitleslangs': ['en', 'en-US', 'en-GB'],
+                'subtitlesformat': 'json3',
+                'quiet': True,
+                'no_warnings': True,
+            }
             
-            print(f"📋 找到 {len(available_transcripts)} 个字幕:")
-            for t in available_transcripts:
-                print(f"   - {t['language']} ({t['language_code']}) [自动生成: {t['is_generated']}]")
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(f"https://www.youtube.com/watch?v={vid}", download=False)
+                
+                # 获取字幕
+                if 'subtitles' in info and info['subtitles']:
+                    print(f"📋 找到手动字幕: {list(info['subtitles'].keys())}")
+                    # 优先使用手动字幕
+                    for lang in ['en', 'en-US', 'en-GB']:
+                        if lang in info['subtitles']:
+                            subtitle_url = info['subtitles'][lang][0]['url']
+                            print(f"✅ 使用手动字幕: {lang}")
+                            segments = fetch_subtitle_from_url(subtitle_url)
+                            if segments:
+                                break
+                
+                elif 'automatic_captions' in info and info['automatic_captions']:
+                    print(f"📋 找到自动字幕: {list(info['automatic_captions'].keys())}")
+                    # 使用自动字幕
+                    for lang in ['en', 'en-US', 'en-GB']:
+                        if lang in info['automatic_captions']:
+                            # 找到 json3 格式的字幕
+                            for subtitle in info['automatic_captions'][lang]:
+                                if subtitle.get('ext') == 'json3':
+                                    subtitle_url = subtitle['url']
+                                    print(f"✅ 使用自动字幕: {lang}")
+                                    segments = fetch_subtitle_from_url(subtitle_url)
+                                    if segments:
+                                        break
+                            if segments:
+                                break
+                
+                if segments:
+                    print(f"✅ yt-dlp 成功: {len(segments)} 段")
+                else:
+                    raise Exception("yt-dlp 未找到字幕")
+                    
+        except Exception as e1:
+            print(f"❌ yt-dlp 失败: {str(e1)}")
             
-            if not available_transcripts:
-                raise Exception("没有找到任何可用字幕")
-            
-            # 优先选择英语字幕，然后是第一个可用的
-            selected_transcript = None
-            for transcript in transcript_list:
-                if transcript.language_code in ['en', 'en-US', 'en-GB']:
-                    selected_transcript = transcript
-                    print(f"✅ 选择英语字幕: {transcript.language} ({transcript.language_code})")
-                    break
-            
-            if not selected_transcript:
-                selected_transcript = list(transcript_list)[0]
-                print(f"✅ 选择第一个可用字幕: {selected_transcript.language} ({selected_transcript.language_code})")
-            
-            # 获取字幕内容
-            segments = selected_transcript.fetch()
-            print(f"✅ 成功获取 {len(segments)} 段字幕")
-            
-        except Exception as e:
-            error_msg = f"获取字幕失败: {str(e)}"
-            print(f"\n❌ {error_msg}")
-            return jsonify({"error": error_msg}), 404
+            # 策略 2: 备用 youtube-transcript-api
+            try:
+                print(f"\n🔄 方法 2: 使用 youtube-transcript-api...")
+                transcript_list = YouTubeTranscriptApi.list_transcripts(vid)
+                
+                # 优先选择英语字幕
+                selected_transcript = None
+                for transcript in transcript_list:
+                    if transcript.language_code in ['en', 'en-US', 'en-GB']:
+                        selected_transcript = transcript
+                        break
+                
+                if not selected_transcript:
+                    selected_transcript = list(transcript_list)[0]
+                
+                segments = selected_transcript.fetch()
+                print(f"✅ youtube-transcript-api 成功: {len(segments)} 段")
+                
+            except Exception as e2:
+                error_msg = f"所有方法都失败了。yt-dlp: {str(e1)}; transcript-api: {str(e2)}"
+                print(f"\n❌ {error_msg}")
+                return jsonify({"error": error_msg}), 404
         
         # 格式化输出
         full_text = " ".join([s["text"] for s in segments])
