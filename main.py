@@ -46,17 +46,23 @@ def home():
 
 @app.route("/extract", methods=["POST"])
 def extract():
-    """提取 YouTube 字幕 - 支持完整翻页"""
+    """提取 YouTube 字幕 - 使用后端配置的 Cookie"""
+    import os
+    
     url = request.json.get("url", "")
     vid = get_video_id(url)
     
     if not vid:
         return jsonify({"error": "Invalid YouTube URL"}), 400
 
+    # 从环境变量获取 YouTube Cookies
+    youtube_cookies = os.environ.get("YOUTUBE_COOKIES", "")
+    
     try:
         print(f"\n{'='*60}")
         print(f"🎯 开始提取字幕")
         print(f"📹 视频 ID: {vid}")
+        print(f"🍪 Cookies: {'已配置' if youtube_cookies else '未配置（将尝试无认证）'}")
         print(f"{'='*60}")
         
         # 获取完整字幕（自动翻页）
@@ -76,6 +82,16 @@ def extract():
                 'quiet': True,
                 'no_warnings': True,
             }
+            
+            # 如果配置了 cookies，写入临时文件
+            import tempfile
+            cookie_file = None
+            if youtube_cookies:
+                print(f"   🍪 使用配置的 YouTube Cookies")
+                cookie_file = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt')
+                cookie_file.write(youtube_cookies)
+                cookie_file.close()
+                ydl_opts['cookiefile'] = cookie_file.name
             
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(f"https://www.youtube.com/watch?v={vid}", download=False)
@@ -112,6 +128,14 @@ def extract():
                     print(f"✅ yt-dlp 成功: {len(segments)} 段")
                 else:
                     raise Exception("yt-dlp 未找到字幕")
+            
+            # 清理临时 cookie 文件
+            if cookie_file:
+                import os
+                try:
+                    os.unlink(cookie_file.name)
+                except:
+                    pass
                     
         except Exception as e1:
             print(f"❌ yt-dlp 失败: {str(e1)}")
