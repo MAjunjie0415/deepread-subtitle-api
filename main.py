@@ -56,7 +56,22 @@ def extract():
         return jsonify({"error": "Invalid YouTube URL"}), 400
 
     # 从环境变量获取 YouTube Cookies
-    youtube_cookies = os.environ.get("YOUTUBE_COOKIES", "")
+    youtube_cookies_raw = os.environ.get("YOUTUBE_COOKIES", "")
+    youtube_cookies_base64 = os.environ.get("YOUTUBE_COOKIES_BASE64", "")
+    
+    # 优先使用 Base64 编码的 cookies（避免换行符问题）
+    youtube_cookies = ""
+    if youtube_cookies_base64:
+        try:
+            import base64
+            youtube_cookies = base64.b64decode(youtube_cookies_base64).decode('utf-8')
+            print(f"🔓 使用 Base64 解码的 Cookies")
+        except Exception as e:
+            print(f"⚠️  Base64 解码失败: {e}")
+    
+    # 如果没有 Base64，使用原始值
+    if not youtube_cookies and youtube_cookies_raw:
+        youtube_cookies = youtube_cookies_raw
     
     try:
         print(f"\n{'='*60}")
