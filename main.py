@@ -62,7 +62,10 @@ def extract():
         print(f"\n{'='*60}")
         print(f"🎯 开始提取字幕")
         print(f"📹 视频 ID: {vid}")
-        print(f"🍪 Cookies: {'已配置' if youtube_cookies else '未配置（将尝试无认证）'}")
+        print(f"🍪 Cookies 状态: {'已配置' if youtube_cookies else '未配置'}")
+        if youtube_cookies:
+            print(f"🍪 Cookies 长度: {len(youtube_cookies)} 字符")
+            print(f"🍪 Cookies 前 100 字符: {youtube_cookies[:100]}")
         print(f"{'='*60}")
         
         # 获取完整字幕（自动翻页）
