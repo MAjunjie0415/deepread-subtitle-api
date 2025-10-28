@@ -108,10 +108,9 @@ def format_timestamp(seconds):
     return f"{minutes}:{str(secs).zfill(2)}"
 
 if __name__ == "__main__":
-    import os
     # 监听 0.0.0.0 方便容器访问
-    # Zeabur 会自动设置 PORT 环境变量
-    port = int(os.environ.get("PORT", 8000))
+    # Zeabur 使用 8080 端口
+    port = 8080
     print("\n🚀 DeepRead Subtitle API 启动中...")
     print(f"📡 监听端口: {port}")
     print("="*60 + "\n")
