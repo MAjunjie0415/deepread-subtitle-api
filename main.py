@@ -176,6 +176,7 @@ def extract():
         # 获取完整字幕（自动翻页）
         segments = []
         page = 0
+        e0 = None  # 初始化错误变量
         
         # 策略 0: 使用 Playwright 真实浏览器（最强大！）
         try:
@@ -187,11 +188,13 @@ def extract():
             else:
                 raise Exception("Playwright 未找到字幕")
                 
-        except Exception as e0:
+        except Exception as e:
+            e0 = e
             print(f"❌ Playwright 失败: {str(e0)}")
             segments = []
         
         # 如果 Playwright 失败，尝试其他方法
+        e1 = None  # 初始化错误变量
         if not segments:
             # 策略 1: 使用 yt-dlp (最强大，能绕过限制)
             try:
@@ -288,7 +291,8 @@ def extract():
                     except:
                         pass
                         
-            except Exception as e1:
+            except Exception as e:
+                e1 = e
                 print(f"❌ yt-dlp 失败: {str(e1)}")
                 
                 # 策略 2: 备用 youtube-transcript-api
