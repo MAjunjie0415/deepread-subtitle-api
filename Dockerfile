@@ -37,7 +37,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # 安装 Playwright 浏览器（只安装 Chromium）
 RUN playwright install chromium
-RUN playwright install-deps chromium
+# 手动安装依赖，避免 playwright install-deps 的包名问题
+RUN apt-get update && apt-get install -y \
+    fonts-unifont \
+    fonts-ubuntu \
+    && rm -rf /var/lib/apt/lists/*
 
 # 复制应用代码
 COPY . .
