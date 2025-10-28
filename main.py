@@ -40,19 +40,27 @@ def extract():
         # 尝试多种语言
         languages_to_try = [['en'], ['en-US'], ['a.en'], ['zh-CN', 'zh-Hans']]
         
+        last_error = None
         for langs in languages_to_try:
             try:
                 print(f"\n🔄 尝试语言: {langs}")
+                # 获取可用的字幕列表
+                transcript_list = YouTubeTranscriptApi.list_transcripts(vid)
+                print(f"📋 可用字幕: {[t.language_code for t in transcript_list]}")
+                
                 transcript = YouTubeTranscriptApi.get_transcript(vid, languages=langs)
                 segments = transcript
                 print(f"✅ 成功获取 {len(segments)} 段字幕")
                 break
             except Exception as e:
                 print(f"❌ {langs} 失败: {str(e)}")
+                last_error = e
                 continue
         
         if not segments:
-            return jsonify({"error": "No transcript available"}), 404
+            error_msg = f"No transcript available. Last error: {str(last_error)}" if last_error else "No transcript available"
+            print(f"\n❌ 最终失败: {error_msg}")
+            return jsonify({"error": error_msg}), 404
         
         # 格式化输出
         full_text = " ".join([s["text"] for s in segments])
